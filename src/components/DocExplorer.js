@@ -14,6 +14,7 @@ import SchemaDoc from './DocExplorer/SchemaDoc';
 import SearchBox from './DocExplorer/SearchBox';
 import SearchResults from './DocExplorer/SearchResults';
 import TypeDoc from './DocExplorer/TypeDoc';
+import { file } from '@babel/types';
 
 const initialNav = {
   name: 'Schema',
@@ -44,6 +45,9 @@ export class DocExplorer extends React.Component {
   constructor() {
     super();
 
+    // const navStack = JSON.parse(localStorage.getItem('__x')) || [initialNav];
+    // console.log(this.props.schema);
+
     this.state = { navStack: [initialNav] };
   }
 
@@ -52,6 +56,165 @@ export class DocExplorer extends React.Component {
       this.props.schema !== nextProps.schema ||
       this.state.navStack !== nextState.navStack
     );
+  }
+
+  componentDidUpdate(prevProps, prevState) {
+    // schema is loaded asynchronously
+    if (!prevProps.schema && this.props.schema) {
+      // reconstitute navStack
+      const storedHashURL = location.hash; //localStorage.getItem('__storedHashURL');
+      if (storedHashURL) {
+        console.log(`Stored URL: ${storedHashURL}`);
+
+        /* eslint-disable no-shadow, no-unused-vars */
+        const [_, rootOperationOrTypeName, ...fields] = storedHashURL
+          .replace(/^#\//, '')
+          .replace(/\/$/, '')
+          .split('/');
+
+        let operationType = null;
+        let navStack = [
+          {
+            name: 'Schema',
+            title: 'Documentation Explorer',
+          },
+        ];
+
+        if (this.props.schema.getQueryType().name === rootOperationOrTypeName) {
+          operationType = 'Query';
+        }
+
+        if (
+          this.props.schema.getMutationType().name === rootOperationOrTypeName
+        ) {
+          operationType = 'Mutation';
+        }
+
+        if (
+          this.props.schema.getSubscriptionType().name ===
+          rootOperationOrTypeName
+        ) {
+          operationType = 'Subscription';
+        }
+
+        let scalarTypeDef = null;
+        if (!operationType) {
+          const typeDef = this.props.schema.getType(rootOperationOrTypeName);
+          console.log('::::!!', typeDef);
+          if (typeDef) {
+            scalarTypeDef = {
+              name: rootOperationOrTypeName,
+              def: typeDef,
+            };
+          } else {
+            console.log(scalarTypeDef, typeDef, rootOperationOrTypeName);
+            throw new Error(
+              `${rootOperationOrTypeName} is not a valid operationType or scalarType`,
+            );
+          }
+        }
+
+        navStack = navStack.concat(
+          operationType
+            ? {
+                name: rootOperationOrTypeName,
+                def: this.props.schema.getType(rootOperationOrTypeName),
+              }
+            : scalarTypeDef,
+          fields.map((fieldName, i) => {
+            if (i === 0) {
+              switch (operationType) {
+                case 'Mutation':
+                  return {
+                    name: fieldName,
+                    def: this.props.schema.getMutationType().getFields()[
+                      fieldName
+                    ],
+                  };
+                case 'Query':
+                  return {
+                    name: fieldName,
+                    def: this.props.schema.getQueryType().getFields()[
+                      fieldName
+                    ],
+                  };
+                case 'Subscription':
+                  return {
+                    name: fieldName,
+                    def: this.props.schema.getSubscriptionType().getFields()[
+                      fieldName
+                    ],
+                  };
+              }
+            } else {
+              return {
+                name: fieldName,
+                def: this.props.schema.getType(fieldName),
+              };
+            }
+          }),
+        );
+
+        //   .map((name, i) => {
+        //     if (name === 'Schema') {
+        //       return {
+        //         name,
+        //         title: 'Documentation Explorer',
+        //       };
+        //     }
+
+        //     if (i === 1) {
+        //       // Determine operation type
+        //     }
+
+        //     // name: Schema, MutationType, QueryType, SubscriptionType
+        //     // switch (name) {
+        //     //   case 'Schema':
+
+        //     //   case 'MutationType':
+        //     //   case 'QueryType':
+        //     //   case 'SubscriptionType':
+        //     //     return {
+        //     //       name,
+        //     //       def: this.props.schema.getType(name),
+        //     //     };
+        //     //   default:
+        //     //     return {
+        //     //       name,
+        //     //       def: this.props.schema.getMutationType().getFields()[name],
+        //     //     };
+        //     //   // $r.props.schema.getMutationType().getFields()['setString']
+        //     // }
+        //   });
+
+        console.log('::?>>>", ', navStack);
+        this.setState({ navStack });
+      }
+    }
+
+    if (prevState.navStack !== this.state.navStack) {
+      console.log('serializing navStack');
+      // console.log(this.state.navStack);
+      // console.log(JSON.stringify(this.state.navStack, null, 2));
+      console.log(`#${this.state.navStack.map(o => o.name).join('/')}`);
+      localStorage.setItem(
+        '__storedHashURL',
+        `#${this.state.navStack.map(o => o.name).join('/')}`,
+      );
+
+      // console.log();
+
+      const leaf = this.state.navStack[this.state.navStack.length - 1];
+
+      console.log('leaf is', leaf);
+      console.log(this.props.schema.getType(leaf.name));
+
+      if (this.props.schema.getType(leaf.name)) {
+        location.hash = `#/Schema/${leaf.name}`;
+      } else {
+        location.hash = this.state.navStack.map(o => o.name).join('/');
+      }
+    }
   }
 
   render() {
@@ -82,10 +245,12 @@ export class DocExplorer extends React.Component {
         />
       );
     } else if (navStack.length === 1) {
+      console.log(':A');
       content = (
         <SchemaDoc schema={schema} onClickType={this.handleClickTypeOrField} />
       );
     } else if (isType(navItem.def)) {
+      console.log(':B');
       content = (
         <TypeDoc
           schema={schema}
@@ -95,6 +260,7 @@ export class DocExplorer extends React.Component {
         />
       );
     } else {
+      console.log(':C', navItem);
       content = (
         <FieldDoc
           field={navItem.def}
@@ -142,6 +308,7 @@ export class DocExplorer extends React.Component {
 
   // Public API
   showDoc(typeOrField) {
+    console.log(`showDoc:`, typeOrField);
     const navStack = this.state.navStack;
     const topNav = navStack[navStack.length - 1];
     if (topNav.def !== typeOrField) {
