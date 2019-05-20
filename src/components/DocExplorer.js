@@ -16,9 +16,42 @@ import SearchResults from './DocExplorer/SearchResults';
 import TypeDoc from './DocExplorer/TypeDoc';
 import { file } from '@babel/types';
 
+const { GraphQLScalarType } = require('graphql');
+
 const initialNav = {
   name: 'Schema',
   title: 'Documentation Explorer',
+};
+
+// (schema: GraphQLSchema, name: string): 'Query' | 'Mutation' | 'Subscription' | null
+const getOperationType = (schema, name) => {
+  if (schema.getQueryType().name === name) {
+    return 'Query';
+  }
+
+  if (schema.getMutationType().name === name) {
+    return 'Mutation';
+  }
+
+  if (schema.getSubscriptionType().name === name) {
+    return 'Subscription';
+  }
+
+  return null;
+};
+
+// <T: string>(schema: GraphQLSchema, name: T): {name: T, def: GraphQLType} | null
+const getScalarTypeDef = (schema, name) => {
+  const typeDef = schema.getType(name);
+
+  if (typeDef) {
+    return {
+      name,
+      def: typeDef,
+    };
+  }
+
+  return null;
 };
 
 /**
@@ -67,127 +100,59 @@ export class DocExplorer extends React.Component {
         console.log(`Stored URL: ${storedHashURL}`);
 
         /* eslint-disable no-shadow, no-unused-vars */
+        // Our URL schema is /Schema/<OperationName|TypeName>/...<FieldName>
         const [_, rootOperationOrTypeName, ...fields] = storedHashURL
-          .replace(/^#\//, '')
-          .replace(/\/$/, '')
+          .replace(/^#\/|\/$/g, '')
           .split('/');
 
-        let operationType = null;
-        let navStack = [
-          {
-            name: 'Schema',
-            title: 'Documentation Explorer',
-          },
-        ];
-
-        if (this.props.schema.getQueryType().name === rootOperationOrTypeName) {
-          operationType = 'Query';
-        }
-
-        if (
-          this.props.schema.getMutationType().name === rootOperationOrTypeName
-        ) {
-          operationType = 'Mutation';
-        }
-
-        if (
-          this.props.schema.getSubscriptionType().name ===
-          rootOperationOrTypeName
-        ) {
-          operationType = 'Subscription';
-        }
+        const operationType = getOperationType(
+          this.props.schema,
+          rootOperationOrTypeName,
+        );
 
         let scalarTypeDef = null;
         if (!operationType) {
-          const typeDef = this.props.schema.getType(rootOperationOrTypeName);
-          console.log('::::!!', typeDef);
-          if (typeDef) {
-            scalarTypeDef = {
-              name: rootOperationOrTypeName,
-              def: typeDef,
-            };
-          } else {
-            console.log(scalarTypeDef, typeDef, rootOperationOrTypeName);
-            throw new Error(
-              `${rootOperationOrTypeName} is not a valid operationType or scalarType`,
-            );
-          }
+          scalarTypeDef = getScalarTypeDef(
+            this.props.schema,
+            rootOperationOrTypeName,
+          );
         }
 
-        navStack = navStack.concat(
-          operationType
-            ? {
-                name: rootOperationOrTypeName,
-                def: this.props.schema.getType(rootOperationOrTypeName),
-              }
-            : scalarTypeDef,
-          fields.map((fieldName, i) => {
+        console.log('~~', scalarTypeDef);
+
+        if (!operationType && !scalarTypeDef) {
+          throw new Error(
+            `${rootOperationOrTypeName} is not a valid operationType or scalarType`,
+          );
+        }
+
+        const navStack = [
+          { ...initialNav },
+          { ...(operationType || scalarTypeDef) },
+        ].concat(
+          fields.map((name, i) => {
+            console.log('namae:', name);
             if (i === 0) {
-              switch (operationType) {
-                case 'Mutation':
-                  return {
-                    name: fieldName,
-                    def: this.props.schema.getMutationType().getFields()[
-                      fieldName
-                    ],
-                  };
-                case 'Query':
-                  return {
-                    name: fieldName,
-                    def: this.props.schema.getQueryType().getFields()[
-                      fieldName
-                    ],
-                  };
-                case 'Subscription':
-                  return {
-                    name: fieldName,
-                    def: this.props.schema.getSubscriptionType().getFields()[
-                      fieldName
-                    ],
-                  };
-              }
-            } else {
-              return {
-                name: fieldName,
-                def: this.props.schema.getType(fieldName),
+              const x = {
+                name,
+                // getMutationType, getSubscriptionType, getQueryType
+                // eslint-disable-next-line no-useless-call
+                def: this.props.schema[`get${operationType}Type`]
+                  .call(this.props.schema)
+                  .getFields()[name],
               };
+
+              return x;
             }
+            return {
+              name,
+              def: this.props.schema.getType(name),
+            };
           }),
         );
 
-        //   .map((name, i) => {
-        //     if (name === 'Schema') {
-        //       return {
-        //         name,
-        //         title: 'Documentation Explorer',
-        //       };
-        //     }
+        console.log(navStack);
 
-        //     if (i === 1) {
-        //       // Determine operation type
-        //     }
-
-        //     // name: Schema, MutationType, QueryType, SubscriptionType
-        //     // switch (name) {
-        //     //   case 'Schema':
-
-        //     //   case 'MutationType':
-        //     //   case 'QueryType':
-        //     //   case 'SubscriptionType':
-        //     //     return {
-        //     //       name,
-        //     //       def: this.props.schema.getType(name),
-        //     //     };
-        //     //   default:
-        //     //     return {
-        //     //       name,
-        //     //       def: this.props.schema.getMutationType().getFields()[name],
-        //     //     };
-        //     //   // $r.props.schema.getMutationType().getFields()['setString']
-        //     // }
-        //   });
-
-        console.log('::?>>>", ', navStack);
         this.setState({ navStack });
       }
     }
@@ -209,7 +174,8 @@ export class DocExplorer extends React.Component {
       console.log('leaf is', leaf);
       console.log(this.props.schema.getType(leaf.name));
 
-      if (this.props.schema.getType(leaf.name)) {
+      const typeDef = this.props.schema.getType(leaf.name);
+      if (typeDef && typeDef instanceof GraphQLScalarType) {
         location.hash = `#/Schema/${leaf.name}`;
       } else {
         location.hash = this.state.navStack.map(o => o.name).join('/');
