@@ -128,12 +128,11 @@ export class DocExplorer extends React.Component {
 
         const navStack = [
           { ...initialNav },
-          { ...(operationType || scalarTypeDef) },
+          operationType || scalarTypeDef,
         ].concat(
           fields.map((name, i) => {
-            console.log('namae:', name);
             if (i === 0) {
-              const x = {
+              return {
                 name,
                 // getMutationType, getSubscriptionType, getQueryType
                 // eslint-disable-next-line no-useless-call
@@ -141,8 +140,6 @@ export class DocExplorer extends React.Component {
                   .call(this.props.schema)
                   .getFields()[name],
               };
-
-              return x;
             }
             return {
               name,
